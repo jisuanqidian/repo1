@@ -5,7 +5,7 @@ import os
 import argparse
 import re
 import random
-from bsub import main as submit_jobs
+from submit_bsub import main as submit_jobs
 from defs import *
 from defs import check_keyword_in_file as check_error
 from info import *
