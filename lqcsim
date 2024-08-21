@@ -1,0 +1,248 @@
+#!/bin/python3.6
+
+import sys
+import os
+import argparse
+import re
+import random
+from bsub import main as submit_jobs
+from defs import *
+from defs import check_keyword_in_file as check_error
+from info import *
+
+sys.path.append(get_workpath()+'/cfg')
+try :
+    import m_cfg
+except :
+    print('[m_cfg] No m_cfg found, use default configuration')
+
+parser = argparse.ArgumentParser(prog = 'lqcsim')
+parser.add_argument('case_name'                                      , type = str, help = 'simulation case name, re wildcard accepted', nargs = '*')
+parser.add_argument('-C' , '-c', '--com_opts' , action = 'append'    , type = str, help = 'append vcs compile options'                , nargs = '*')
+parser.add_argument('-E' , '-e', '--ela_opts' , action = 'append'    , type = str, help = 'append vcs elaboration options'            , nargs = '*')
+parser.add_argument('-S' , '-s', '--sim_opts' , action = 'append'    , type = str, help = 'append vcs simulation options'             , nargs = '*')
+parser.add_argument('-d' , '--dry_run'        , action = 'store_true'            , help = 'print command only, not execute')
+parser.add_argument('-co', '--compile_only'   , action = 'store_true'            , help = 'compile and elaboration only')
+parser.add_argument('-ro', '-r', '--run_only' , action = 'store_true'            , help = 'simulation only')
+parser.add_argument('-o' , '--out_dir'        , default = 'sims'     , type = str, help = 'output directory, default sims')
+parser.add_argument('-b' , '-l', '--bsub_opts', default = 'default'  , type = str, help = 'designate bsub options, uncompleted'       , nargs = '?')
+parser.add_argument('-w' , '--wave_on'        , action = 'store_true'            , help = 'dump wave on, off if skipped')
+parser.add_argument('-seed'                   , default = 'random'   , type = str, help = 'simulation seed, random if skipped')
+
+args = parser.parse_args()
+
+out_dir = 'default'
+paths = {}
+
+def parse_case_name() :
+    caseName = []
+    workpath = os.environ.get('WORKPATH')
+    print('Working path is WORKPATH:{:s}'.format(os.environ.get('WORKPATH')))
+    if len(args.case_name) == 0 and args.compile_only == False :
+        quit()
+    else :
+        for parse in args.case_name :
+            m_str = parse.split()
+            for case_parse in m_str :
+                case_parse = case_parse.replace('*','.*')
+                if any(re.search(case_parse,i) for i in m_cfg.caseName) :
+                    for i in m_cfg.caseName :
+                        if re.search(case_parse,i) != None :
+                            caseName.append(i)
+                else :
+                    warn_info(f'{case_parse} is not a valid case')
+    return caseName
+
+def parse_paths(caseName) :
+    global paths
+    paths['sim'] = '{:s}/{:s}'.format(get_workpath(),args.out_dir)
+    paths['tb']  = '{:s}/tb'.format(paths['sim'])
+    paths['tc']  = '{:s}/tc'.format(paths['sim'])
+    for i in caseName :
+        paths[i] = '{:s}/{:s}'.format(paths['tc'],i)
+    for i in paths :
+        if os.path.exists(paths[i]) == False :
+            os.mkdir(paths[i])
+    return paths
+
+def parse_com_opts() :
+    workpath = os.environ['WORKPATH']
+    base_com_cmd = []
+    base_com_cmd.append(' -sverilog'              )
+    base_com_cmd.append(' +v2k'                   )
+    base_com_cmd.append(' -full64'                )
+    base_com_cmd.append(' +plusarg_save'          )
+    base_com_cmd.append(' +vcs+lic+wait'          )
+    base_com_cmd.append(' -debug_access+all'      )
+    base_com_cmd.append(' +error+99'              )
+    base_com_cmd.append(' +nospecify'             )
+    base_com_cmd.append(' +notimingcheck'         )
+    base_com_cmd.append(' -timescale=1ns/1ps'     )
+    base_com_cmd.append(' -ntb_opts uvm-1.1'      )
+    base_com_cmd.append(' -top harness'           )
+    base_com_cmd.append(' -debug_access+all'      )
+    base_com_cmd.append(' -kdb'                   )
+    base_com_cmd.append(' -lca'                   )
+    tb_flist = '{:s}/cfg/tb.f'.format(workpath)
+    cmp_log  = '{:s}/cmp.log'.format(paths['tb'])
+    simv     = '{:s}/simv'.format(paths['tb'])
+    Mdir     = '{:s}/csrc'.format(paths['tb'])
+    base_com_cmd.append(' -f {:s}'.format(tb_flist))
+    base_com_cmd.append(' -l {:s}'.format(cmp_log))
+    base_com_cmd.append(' -o {:s}'.format(simv))
+    base_com_cmd.append(' -Mdir={:s}'.format(Mdir))
+    com_cmd = ''
+    for i in base_com_cmd :
+        com_cmd += i
+    if args.com_opts != None :
+        for i in args.com_opts :
+            for j in i :
+                try :
+                    m_com_opts += ' ' + j
+                except :
+                    m_com_opts = ' ' + j
+        com_cmd += m_com_opts
+    return com_cmd
+
+def parse_sim_opts(caseName) :
+    workpath = os.environ['WORKPATH']
+    sim_cmd_list = []
+    #uvm_verbosity = '+UVM_VERBOSITY=UVM_LOW'
+    #if args.sim_opts != None :
+    #    for i in args.sim_opts :
+    #        for j in i :
+    #            if 'UVM_VERBOSITY' in j :
+    #                uvm_verbosity = j
+    #                break
+    for case in caseName :
+        base_sim_cmd = []
+        base_sim_cmd.append(' +vcs+lic+wait')
+        base_sim_cmd.append(' +fsdb+force')
+        base_sim_cmd.append(' -assert')
+        base_sim_cmd.append(' nopostproc')
+        base_sim_cmd.append(' +UVM_MAX_QUIT_COUNT=99,0')
+        base_sim_cmd.append(' +uvm_set_severity=*,RNDFLD,UVM_WARNING,UVM_FATAL')
+        base_sim_cmd.append(' -ucli')
+        base_sim_cmd.append(' +UVM_TESTNAME={:s}'.format(case))
+        base_sim_cmd.append(' +tc={:s}'.format(case))
+        #base_sim_cmd.append(' ' + uvm_verbosity)
+        if args.seed == 'random' :
+            seed = str(random.randint(0,999999))
+        else :
+            try :
+                int(args.seed)
+                seed = args.seed
+            except :
+                print('Error: seed ({:s}) is not int !!!'.format(args.seed))
+                quit()
+        base_sim_cmd.append(' +ntb_random_seed={:s}'.format(seed))
+        base_sim_cmd.append(' +seed={:s}'.format(seed))
+        run_log = '{:s}/run.log'.format(paths[case])
+        base_sim_cmd.append(' -l {:s}'.format(run_log))
+        base_sim_cmd.append(' -do {:s}/cfg/wave.do'.format(workpath))
+        if args.wave_on == True :
+            fsdb_file = '{:s}/wave.fsdb'.format(paths[case])
+            base_sim_cmd.append(' +fsdbfile+{:s}'.format(fsdb_file))
+            base_sim_cmd.append(' +fsdb+dump_log=off')
+            base_sim_cmd.append(' +fsdb+force')
+            base_sim_cmd.append(' +fsdb+delta')
+            base_sim_cmd.append(' +fsdb+glitch=0')
+        sim_cmd = ''
+        m_sim_opts = ''
+        for i in base_sim_cmd :
+            sim_cmd += i
+        if args.sim_opts != None :
+            for i in args.sim_opts :
+                for j in i :
+                    m_sim_opts += ' ' + j
+            sim_cmd += m_sim_opts
+        sim_cmd = '{:s}/simv'.format(paths['tb']) + sim_cmd
+        sim_cmd_list.append(sim_cmd)
+    return sim_cmd_list
+
+def main() :
+    global out_dir
+    global paths
+    workpath = get_workpath()
+    out_dir  = args.out_dir
+    caseName = parse_case_name()
+    paths    = parse_paths(caseName)
+    com_cmd  = parse_com_opts()
+    os.chdir('{:s}/{:s}'.format(workpath,out_dir))
+    print('Outputing into directory {:s}/{:s}'.format(workpath,out_dir))
+    white_info('\n************ Start simulation ************\n',True,True)
+    if args.bsub_opts != 'default' :
+        try :
+            bsub_cmd = 'bsub ' + args.bsub_opts
+        except :
+            bsub_cmd = 'bsub '
+    else :
+        bsub_cmd = 'bsub -I'
+    com_cmd = 'vcs' + com_cmd
+    if args.run_only != True :
+        print('{:s} {:s} {:s}\n'.format(blue_info('[compile command]',True),bsub_cmd,com_cmd))
+        if args.dry_run != True :
+            if '-I' in bsub_cmd :
+                os.system('{:s} {:s}'.format(bsub_cmd,com_cmd))
+            else :
+                submit_jobs(com_cmd,'compile')
+            for i in re.findall(r'\/[^ ]*\/cmp\.log',com_cmd) :
+                cmp_log = i.strip()
+        #print(f'\033[32m[cmp.log path]\033[0m {cmp_log}\n')
+            if check_error(cmp_log,['^Error'],0) :
+                print(red_info('\n[fail]',True)+f' {cmp_log}')
+                return
+            else :
+                print(green_info('\n[pass]',True)+f' {cmp_log}')
+
+    if len(caseName) == 1 :
+        bsub_cmd = 'bsub -I'
+    else : 
+        bsub_cmd = 'bsub'
+
+    if args.compile_only != True :
+        sim_cmd_list  = parse_sim_opts(caseName)
+
+        print('')
+        if len(sim_cmd_list) == 1 :
+            print('{:s} {:s} {:s}'.format(blue_info('[sim command]',True),bsub_cmd,sim_cmd_list[0]))
+            if args.dry_run != True :
+                os.system('{:s} {:s}'.format(bsub_cmd,sim_cmd_list[0]))
+        else :
+            for sim_cmd in sim_cmd_list :
+                print('{:s} {:s} {:s}'.format(blue_info('[sim command]',True),bsub_cmd,sim_cmd))
+            if args.dry_run != True :
+                submit_jobs(sim_cmd_list,caseName)
+        #for sim_cmd in sim_cmd_list :
+        #    print('\033[1;31m[sim command] \033[0m{:s} {:s}'.format(bsub_cmd,sim_cmd))
+        #    if args.dry_run != True :
+        #        os.system('{:s} {:s}'.format(bsub_cmd,sim_cmd))
+        if args.dry_run != True :
+            print('')
+            for index,sim_cmd in enumerate(sim_cmd_list) :
+                for i in re.findall(r'\/[^ ]*\/run\.log',sim_cmd) :
+                    run_log = ('{:s}'.format(i.strip()))
+                if check_error(run_log) :
+                    print('{:s} {:s}'.format(red_info('[fail]',True),caseName[index]))
+                else :
+                    print('{:s} {:s}'.format(green_info('[pass]',True),caseName[index]))
+                print(f'[run.log path] {run_log}')
+                for i in re.findall(r'\/[^ ]*\/wave\.fsdb',sim_cmd) :
+                    print('[wave.fsdb path] {:s}'.format(i.strip()))
+
+if __name__ == '__main__' :
+    main()
+
+#def font(font_color,backgroud,mode) :
+#    ['DEFAULT']   = '0'
+#    ['BRIGHT']    = '1'
+#    ['UNDERLINE'] = '4'
+#    ['BLACK']     = '30'
+#    ['RED']       = '31'
+#    ['GREEN']     = '32'
+#    ['YELLOW']    = '33'
+#    ['BLUE']      = '34'
+#    ['MAGENTA']   = '35'
+#    ['CYAN']      = '36'
+#    ['WHITE']     = '37'
+#    return
