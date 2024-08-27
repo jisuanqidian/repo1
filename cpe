@@ -1,0 +1,33 @@
+import sys
+import os
+import threading
+
+rootpath = os.getcwd()
+threads = []
+casenames = {}
+
+casenames['rxp_meas_mini'] = 22
+
+def run_algo(cmd) :
+    os.system('bsub -I ' + cmd)
+
+
+for case in casenames:
+    for i in range(1,casenames[case]+1):
+        case = f'{case}_{i:04d}'
+        try :
+            os.chdir(rootpath+'/'+case)
+            os.system('ln -sf /project/sky/user/guoruigang/skydev_git/database/soc/models/hw/nr_downlink/v3/project/dl/simCpe simCpe')
+        except Exception as e:
+            print(e)
+            print(f'check casename: {case}, this case will be skipped')
+            continue
+        prm_list = [j for j in os.listdir('prm') if j.endswith('prm')]
+        for prm in prm_list:
+            m_cmd = f'./simCpe {prm}'
+            thread = threading.Thread(target=run_algo,args=(m_cmd,))
+            thread.start()
+            threads.append(thread)
+
+for i in threads:
+    i.join()
