@@ -2,7 +2,7 @@ def color_format(color,bright=False) :
     colors = {
             'BLACK': '30', 'RED': '38;2;235;44;44', 'GREEN': '38;2;50;205;50', 'YELLOW': '38;2;255;215;0',
             'BLUE': '38;2;30;144;255', 'MAGENTA': '35', 'CYAN': '36', 'WHITE': '37',
-            'DEFAULT': '0'}
+            'LIGHT BLUE': '38;2;135;206;250', 'DEFAULT': '0'}
     bright = '1;' if bright else ''
     if color not in colors :
         color = 'WHITE'
@@ -28,6 +28,9 @@ def yellow_info(info,bright=False,prt=False) :
 
 def blue_info(info,bright=False,prt=False) :
     return color_info('BLUE',info,bright,prt)
+
+def light_blue_info(info,bright=False,prt=False) :
+    return color_info('LIGHT BLUE',info,bright,prt)
 
 def magenta_info(info,bright=False,prt=False) :
     return color_info('MAGENTA',info,bright,prt)
