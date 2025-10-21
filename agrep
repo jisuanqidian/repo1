@@ -1,0 +1,3 @@
+#!/bin/csh
+
+grep -rin --color=auto $*
