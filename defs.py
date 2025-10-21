@@ -2,12 +2,19 @@ import os
 import re
 import sys
 
-def get_workpath() :
-    workpath = os.getcwd()
-    if os.path.isdir(workpath+'/env') != True and os.path.isdir(workpath+'/cfg') != True and os.path.isdir(workpath+'/th') != True:
-        print('Warning: must work on module directory!')
-        sys.exit()
+def get_workpath(workpath = '') :
+    if 'WORKPATH' in os.environ :
+        workpath = os.environ['WORKPATH']
     else :
+        if workpath == 'curr' :
+            workpath = os.getcwd()
+        elif workpath != '' :
+            workpath = workpath
+        else :
+            workpath = os.getcwd()
+            if os.path.isdir(workpath+'/env') != True or os.path.isdir(workpath+'/cfg') != True or os.path.isdir(workpath+'/th') != True:
+                print('Warning: must work on module directory!')
+                sys.exit()
         workpath = workpath.split('/sim')[0]
         os.environ['WORKPATH'] = workpath
     return workpath
