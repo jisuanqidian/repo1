@@ -10,12 +10,6 @@ from defs import *
 from defs import check_keyword_in_file as check_error
 from info import *
 
-sys.path.append(get_workpath()+'/cfg')
-try :
-    import m_cfg
-except :
-    print(blue_info('[m_cfg]') + ' No m_cfg found, use default configuration')
-
 parser = argparse.ArgumentParser(prog = 'lqcsim')
 parser.add_argument('case_name'                                      , type = str, help = 'simulation case name, re wildcard accepted', nargs = '*')
 parser.add_argument('-C' , '-c', '--com_opts' , action = 'append'    , type = str, help = 'append vcs compile options'                , nargs = '*')
@@ -32,8 +26,20 @@ parser.add_argument('--show_case'             , action = 'store_true'           
 parser.add_argument('-comrtl', '--compile_rtl', action = 'store_true'            , help = 'compile rtl only')
 parser.add_argument('-comenv', '--compile_env', action = 'store_true'            , help = 'compile testbench only(testbench.sv not included)')
 parser.add_argument('-ps', '--print_summary'  , action = 'store_true'            , help = 'print last regression summary')
+parser.add_argument('-path', '--path'         , default = ''         , type = str, help = 'set working path')
+parser.add_argument('-uvm', '--uvm_version'   , default = '1.1'      , type = str, help = 'set UVM version')
 
 args = parser.parse_args()
+
+if args.path != '' :
+    workpath = args.path
+else :
+    workpath = ''
+sys.path.append(get_workpath(workpath)+'/cfg')
+try :
+    import m_cfg
+except :
+    print(blue_info('[m_cfg]') + ' No m_cfg found, use default configuration')
 
 out_dir = 'default'
 paths = {}
@@ -93,29 +99,27 @@ def parse_com_opts(com_depend_list) :
         base_com_cmd.append(' +error+99'              )
         base_com_cmd.append(' +nospecify'             )
         base_com_cmd.append(' +notimingcheck'         )
-        base_com_cmd.append(' -timescale=1ns/1ps'     )
-        base_com_cmd.append(' -ntb_opts uvm-1.1'      )
+        base_com_cmd.append(' -timescale=1ns/10fs'     )
+        base_com_cmd.append(' -ntb_opts uvm-{:s}'.format(args.uvm_version.strip())     )
         if args.compile_rtl != True :
-            base_com_cmd.append(' -top harness'           )
+            base_com_cmd.append(' -top tb'            )
         base_com_cmd.append(' -debug_access+all'      )
         base_com_cmd.append(' -kdb'                   )
         base_com_cmd.append(' -lca'                   )
-        env_flist = '{:s}/cfg/env.f'.format(workpath)
+        base_com_cmd.append(m_cfg.com_opts[build])
         rtl_flist = '{:s}/cfg/dut.f'.format(workpath)
+        env_flist = '{:s}/cfg/env.f'.format(workpath)
         cmp_log   = '{:s}/cmp.log'.format(paths[build])
         simv      = '{:s}/simv'.format(paths[build])
         Mdir      = '{:s}/csrc'.format(paths[build])
-        if args.compile_rtl != True :
-            base_com_cmd.append(' -f {:s}'.format(env_flist))
         if args.compile_env != True :
             base_com_cmd.append(' -f {:s}'.format(rtl_flist))
+        if args.compile_rtl != True :
+            base_com_cmd.append(' -f {:s}'.format(env_flist))
         base_com_cmd.append(' -l {:s}'.format(cmp_log))
         base_com_cmd.append(' -o {:s}'.format(simv))
         base_com_cmd.append(' -Mdir={:s}'.format(Mdir))
-        base_com_cmd.append(m_cfg.com_opts[build])
         com_cmd = ''
-        for i in base_com_cmd :
-            com_cmd += i
         if args.com_opts != None :
             for i in args.com_opts :
                 for j in i :
@@ -124,6 +128,8 @@ def parse_com_opts(com_depend_list) :
                     except :
                         m_com_opts = ' ' + j
             com_cmd += m_com_opts
+        for i in base_com_cmd :
+            com_cmd += i
         com_cmd_list.append(com_cmd)
     return com_cmd_list
 
@@ -198,7 +204,7 @@ def summary_print(sim_cmd_list,caseName) :
             summary += '{:s} {:s}\n'.format(red_info('[fail]',True),caseName[index])
             #print('{:s} {:s}'.format(red_info('[fail]',True),caseName[index]))
         else :
-            summary += '{:s} {:s}\n'.format(green_info('[pass]',True),caseName[index])
+            summary += '{:s} {:s}\n'.format(milk_green_info('[pass]',True),caseName[index])
             #print('{:s} {:s}'.format(green_info('[pass]',True),caseName[index]))
         for i in re.findall(r'\+ntb_random_seed=\d*',sim_cmd) :
             summary += '[seed] {:s}\n'.format(i.strip().split('=')[1])
@@ -230,7 +236,9 @@ def main() :
         return
     print('Outputing into directory {:s}/{:s}'.format(workpath,out_dir))
     white_info('\n************ Start simulation ************\n',True,True)
-    if args.bsub_opts != 'default' :
+    if args.bsub_opts == 'no' :
+        bsub_cmd = ''
+    elif args.bsub_opts != 'default' :
         try :
             bsub_cmd = 'bsub ' + args.bsub_opts
         except :
@@ -259,10 +267,13 @@ def main() :
                     print(red_info('\n[fail]',True)+f' {cmp_log}')
                     sys.exit()
                 else :
-                    print(green_info('\n[pass]',True)+f' {cmp_log}')
+                    print(milk_green_info('\n[pass]',True)+f' {cmp_log}')
 
     if len(caseName) == 1 :
-        bsub_cmd = 'bsub -I'
+        if args.bsub_opts == 'no' :
+            bsub_cmd = ''
+        else :
+            bsub_cmd = 'bsub -I'
     else : 
         bsub_cmd = 'bsub'
 
